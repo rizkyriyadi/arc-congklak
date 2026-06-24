@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Arc Entertainment — Game Foundation</title>
+    <title>Congklak — Arc Entertainment</title>
     <style>
       :root {
         color-scheme: dark;
@@ -12,8 +12,8 @@
       body {
         margin: 0;
         height: 100%;
-        background: #0d1117;
-        color: #e6edf3;
+        background: #1a1009;
+        color: #f4e6cf;
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       }
       #app {
@@ -21,38 +21,39 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 12px;
+        gap: 10px;
         min-height: 100%;
         padding: 16px;
         box-sizing: border-box;
       }
       h1 {
         margin: 0;
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 600;
-        letter-spacing: 0.02em;
-        color: #f0c674;
+        letter-spacing: 0.03em;
+        color: #e8b04b;
       }
       p.subtitle {
         margin: 0;
-        font-size: 0.85rem;
-        opacity: 0.6;
+        font-size: 0.8rem;
+        opacity: 0.55;
       }
       canvas {
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        background: #161b22;
+        border: 1px solid #5a3a1d;
+        border-radius: 12px;
+        background: #241812;
         max-width: 100%;
         height: auto;
         touch-action: none;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
       }
     </style>
   </head>
   <body>
     <div id="app">
-      <h1>Arc Entertainment</h1>
-      <p class="subtitle">Game foundation — the loop is ticking.</p>
-      <canvas id="game" width="800" height="450"></canvas>
+      <h1>Congklak · Arc Entertainment</h1>
+      <p class="subtitle">Permainan biji tradisional Nusantara — mode teka-teki</p>
+      <canvas id="game" width="960" height="600"></canvas>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

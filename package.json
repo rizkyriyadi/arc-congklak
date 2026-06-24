@@ -8,10 +8,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild src/congklak/rules.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/rules.test.mjs && node node_modules/.cache/rules.test.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
-    "vite": "^5.4.2"
+    "vite": "^5.4.2",
+    "esbuild": "^0.21.5"
   }
 }
