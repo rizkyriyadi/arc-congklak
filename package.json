@@ -12,7 +12,8 @@
     "test": "npm run test:rules && npm run test:match",
     "test:rules": "esbuild src/congklak/rules.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/rules.test.mjs && node node_modules/.cache/rules.test.mjs",
     "test:match": "esbuild src/congklak/match.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/match.test.mjs && node node_modules/.cache/match.test.mjs",
-    "build:standalone": "node scripts/build-standalone.mjs"
+    "build:standalone": "node scripts/build-standalone.mjs",
+    "verify:headless": "npm run build:standalone && node scripts/verify-headless.mjs"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
