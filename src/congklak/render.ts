@@ -365,7 +365,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = COL_TEXT;
   ctx.font = "15px ui-rounded, system-ui, sans-serif";
   const rules = [
-    "Pilih satu rumahmu — bijinya disebar satu per lubang, searah jarum jam.",
+    "Pilih satu rumahmu — bijinya disebar satu per lubang, berlawanan arah jarum jam.",
     "Biji terakhir jatuh di lumbungmu → giliran gratis (rantai!).",
     "Berakhir di rumah kosong milikmu → tembak biji seberang ke lumbung.",
     "Kumpulkan biji target sebelum langkahmu habis.",
