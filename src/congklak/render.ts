@@ -36,8 +36,10 @@ const COL_TEXT = "#f4e6cf";
 const COL_TEXT_DIM = "rgba(244, 230, 207, 0.55)";
 const COL_RED = "#c8102e"; // Indonesian-flag red, used sparingly
 
-export interface RenderState {
+/** Everything needed to paint the board itself, shared by every game mode. */
+export interface BoardLayer {
   pits: number[];
+  /** Houses to ring as legal (any row — the current mover's side). */
   legal: number[];
   hoverHouse: number; // -1 if none
   /** Pits to pulse this frame (capture flash). */
@@ -46,9 +48,26 @@ export interface RenderState {
   flying: { from: Point; to: Point; t: number } | null;
   /** Seeds still in hand during a sow segment (shown near active pit). */
   hand: { index: number; count: number } | null;
+  /** Store(s) to render in the gold "active" colour (whose lumbung is in play). */
+  activeStores?: number[];
+  southLabel: string;
+  northLabel: string;
+}
+
+export interface RenderState extends BoardLayer {
   level: string;
   target: number;
   movesLeft: number;
+  toast: { text: string; alpha: number } | null;
+}
+
+/** State for the two-player / vs-AI match screens. */
+export interface MatchRenderState extends BoardLayer {
+  /** Headline above the HUD, e.g. "Giliran Selatan" / "AI berpikir…". */
+  turnText: string;
+  southScore: number;
+  northScore: number;
+  vsAi: boolean;
   toast: { text: string; alpha: number } | null;
 }
 
@@ -145,7 +164,12 @@ function drawPitWell(
   ctx.restore();
 }
 
-export function drawScene(ctx: CanvasRenderingContext2D, st: RenderState): void {
+/**
+ * Paint the board — hull, stores, houses, seeds, legal rings, flying seed, hand
+ * counter. Mode-agnostic: every screen draws this first, then adds its own HUD.
+ */
+export function drawBoardLayer(ctx: CanvasRenderingContext2D, st: BoardLayer): void {
+  const activeStores = st.activeStores ?? [PLAYER_STORE];
   // Background.
   const bg = ctx.createLinearGradient(0, 0, 0, VIEW_H);
   bg.addColorStop(0, COL_BG_TOP);
@@ -188,12 +212,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: RenderState): void 
     const c = pitCenter(i);
     drawPitWell(ctx, c, HOUSE_RADIUS, HOUSE_RADIUS);
 
-    const isPlayer = i <= 6;
     const legal = st.legal.includes(i);
     const hovered = st.hoverHouse === i;
 
-    // Legal-move and hover affordances (player side only).
-    if (isPlayer && legal) {
+    // Legal-move and hover affordances for the side currently to move.
+    if (legal) {
       ctx.save();
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, HOUSE_RADIUS + 4, HOUSE_RADIUS + 4, 0, 0, Math.PI * 2);
@@ -225,24 +248,22 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: RenderState): void 
     }
   }
 
-  // Store counts (big).
+  // Store counts (big). The active mover's lumbung glows gold.
   for (const store of [PLAYER_STORE, OPP_STORE]) {
     const c = pitCenter(store);
-    ctx.fillStyle = store === PLAYER_STORE ? COL_GOLD : COL_TEXT_DIM;
+    ctx.fillStyle = activeStores.includes(store) ? COL_GOLD : COL_TEXT_DIM;
     ctx.font = "bold 30px ui-rounded, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(st.pits[store]), c.x, c.y + STORE_RY + 24);
   }
 
-  // Side labels.
+  // Side labels (per-mode wording).
   ctx.font = "13px system-ui, sans-serif";
   ctx.fillStyle = COL_TEXT_DIM;
   ctx.textAlign = "center";
-  ctx.fillText("Lumbung-mu", pitCenter(PLAYER_STORE).x, pitCenter(PLAYER_STORE).y - STORE_RY - 16);
-  ctx.fillText("Lumbung lawan", pitCenter(OPP_STORE).x, pitCenter(OPP_STORE).y - STORE_RY - 16);
-  ctx.fillStyle = COL_TEXT_DIM;
-  ctx.fillText("◄ rumahmu — tekan 1–7 atau klik ►", VIEW_W / 2, VIEW_H - 18);
+  ctx.fillText(st.southLabel, pitCenter(PLAYER_STORE).x, pitCenter(PLAYER_STORE).y - STORE_RY - 16);
+  ctx.fillText(st.northLabel, pitCenter(OPP_STORE).x, pitCenter(OPP_STORE).y - STORE_RY - 16);
 
   // Flying seed (sow animation).
   if (st.flying) {
@@ -261,28 +282,44 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: RenderState): void 
     ctx.textAlign = "center";
     ctx.fillText(`✊ ${st.hand.count}`, c.x, c.y - HOUSE_RADIUS - 14);
   }
+}
 
-  // HUD bar.
+/** Centred toast banner (free turn / capture / win messages). */
+function drawToast(
+  ctx: CanvasRenderingContext2D,
+  toast: { text: string; alpha: number } | null,
+): void {
+  if (!toast || toast.alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = toast.alpha;
+  ctx.fillStyle = "rgba(20,12,6,0.82)";
+  ctx.strokeStyle = COL_GOLD;
+  ctx.lineWidth = 2;
+  ctx.font = "bold 20px ui-rounded, system-ui, sans-serif";
+  const w = ctx.measureText(toast.text).width;
+  roundRect(ctx, VIEW_W / 2 - w / 2 - 26, 92, w + 52, 40, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = COL_GOLD;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(toast.text, VIEW_W / 2, 113);
+  ctx.restore();
+}
+
+// --- solo puzzle screen -----------------------------------------------------
+
+export function drawScene(ctx: CanvasRenderingContext2D, st: RenderState): void {
+  drawBoardLayer(ctx, st);
+
+  // Bottom hint.
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.fillStyle = COL_TEXT_DIM;
+  ctx.textAlign = "center";
+  ctx.fillText("◄ rumahmu — tekan 1–7 atau klik · Esc: menu ►", VIEW_W / 2, VIEW_H - 18);
+
   drawHud(ctx, st);
-
-  // Toast (free turn / capture messages).
-  if (st.toast && st.toast.alpha > 0) {
-    ctx.save();
-    ctx.globalAlpha = st.toast.alpha;
-    ctx.fillStyle = "rgba(20,12,6,0.82)";
-    ctx.strokeStyle = COL_GOLD;
-    ctx.lineWidth = 2;
-    const w = ctx.measureText(st.toast.text).width;
-    roundRect(ctx, VIEW_W / 2 - w / 2 - 26, 92, w + 52, 40, 10);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = COL_GOLD;
-    ctx.font = "bold 20px ui-rounded, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(st.toast.text, VIEW_W / 2, 113);
-    ctx.restore();
-  }
+  drawToast(ctx, st.toast);
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, st: RenderState): void {
@@ -310,6 +347,83 @@ function drawHud(ctx: CanvasRenderingContext2D, st: RenderState): void {
   ctx.fillStyle = st.movesLeft <= 1 ? COL_RED : COL_TEXT;
   ctx.font = "15px ui-rounded, system-ui, sans-serif";
   ctx.fillText(`Langkah tersisa: ${st.movesLeft}`, VIEW_W - 40, 80);
+}
+
+// --- 2P / vs-AI match screen ------------------------------------------------
+
+export function drawMatchScene(
+  ctx: CanvasRenderingContext2D,
+  st: MatchRenderState,
+): void {
+  drawBoardLayer(ctx, st);
+
+  // Title / mode in the corner.
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = COL_GOLD;
+  ctx.font = "bold 22px ui-rounded, system-ui, sans-serif";
+  ctx.fillText("Congklak", 40, 52);
+  ctx.fillStyle = COL_TEXT_DIM;
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.fillText(st.vsAi ? "· lawan AI" : "· 2 pemain", 168, 51);
+
+  // Whose turn — centred, prominent.
+  ctx.textAlign = "center";
+  ctx.fillStyle = COL_GOLD;
+  ctx.font = "bold 18px ui-rounded, system-ui, sans-serif";
+  ctx.fillText(st.turnText, VIEW_W / 2, 50);
+
+  // Scoreboard, right-aligned.
+  ctx.textAlign = "right";
+  ctx.font = "15px ui-rounded, system-ui, sans-serif";
+  ctx.fillStyle = COL_TEXT;
+  ctx.fillText(`Selatan ${st.southScore}  —  ${st.northScore} Utara`, VIEW_W - 40, 44);
+
+  // Bottom hint.
+  ctx.textAlign = "center";
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.fillStyle = COL_TEXT_DIM;
+  ctx.fillText(
+    "Klik rumah yang menyala atau tekan 1–7 · R: ulang · Esc: menu",
+    VIEW_W / 2,
+    VIEW_H - 18,
+  );
+
+  drawToast(ctx, st.toast);
+}
+
+export function drawMatchEnd(
+  ctx: CanvasRenderingContext2D,
+  st: MatchRenderState,
+  winner: 0 | 1 | null,
+): void {
+  drawMatchScene(ctx, st);
+  panel(ctx);
+
+  ctx.textAlign = "center";
+  const draw = winner === null;
+  ctx.fillStyle = draw ? COL_TEXT : COL_GOLD;
+  ctx.font = "bold 46px ui-rounded, system-ui, sans-serif";
+  const headline = draw
+    ? "Seri!"
+    : st.vsAi
+      ? winner === 0
+        ? "Kamu Menang! 🎉"
+        : "AI Menang"
+      : `Pemain ${winner === 0 ? "Selatan" : "Utara"} Menang! 🎉`;
+  ctx.fillText(headline, VIEW_W / 2, VIEW_H / 2 - 60);
+
+  ctx.fillStyle = COL_TEXT;
+  ctx.font = "20px ui-rounded, system-ui, sans-serif";
+  ctx.fillText(
+    `Lumbung — Selatan ${st.southScore} · Utara ${st.northScore} biji`,
+    VIEW_W / 2,
+    VIEW_H / 2 - 12,
+  );
+
+  ctx.fillStyle = COL_GOLD;
+  ctx.font = "bold 18px ui-rounded, system-ui, sans-serif";
+  ctx.fillText("Tekan R untuk main lagi · Esc untuk menu", VIEW_W / 2, VIEW_H / 2 + 44);
 }
 
 export function roundRect(

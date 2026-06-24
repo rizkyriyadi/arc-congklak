@@ -4,6 +4,26 @@ The technical foundation for [Arc Entertainment](./ROADMAP.md)'s browser-playabl
 Indonesian indie games. Plain **TypeScript + HTML5 Canvas**, served by **Vite**.
 No game engine — see [Why this stack](#why-this-stack).
 
+## ▶ Play Congklak (live)
+
+**<https://rizkyriyadi.github.io/arc-congklak/>** — the first title's solo puzzle
+slice, playable in any modern browser. Press Space (or click) to start, then keys
+1–7 (or click a house) to sow.
+
+### Deploying
+
+The live site is a single self-contained HTML file served from the `gh-pages`
+branch. To redeploy after changes:
+
+```bash
+./scripts/deploy-pages.sh
+```
+
+> Why a branch and not GitHub Actions? The host account currently has Actions
+> disabled by a billing lock. `.github/workflows/deploy.yml` is the intended CI
+> path and is ready to use once that's resolved — switch the Pages source back to
+> "GitHub Actions" and restore its `push:` trigger.
+
 This repo currently ships a "hello, it runs" scene: a blank canvas, a
 fixed-timestep game loop, a bouncing sprite, and a live FPS counter. The actual
 first title lands on top of this in Phase 1.

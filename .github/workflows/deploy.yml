@@ -3,9 +3,12 @@ name: Deploy Congklak to GitHub Pages
 # Public playtest URL for the Congklak vertical slice (ARC-6).
 # Deploys the self-contained single-file build to GitHub Pages on every push to main.
 
+# NOTE: trigger is manual-only for now. The host account has GitHub Actions
+# disabled by a billing lock, so push-triggered runs only fail noisily. Until
+# that's resolved the live site is served from the `gh-pages` branch (see
+# scripts/deploy-pages.sh). Once Actions is unlocked, switch the Pages source
+# back to "GitHub Actions" and restore the `push:` trigger below.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
