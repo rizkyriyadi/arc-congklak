@@ -20,6 +20,12 @@ npm install
 npm run dev
 ```
 
+> If `npm install` skips the dev tooling (you'll see `vite: not found` on
+> `npm run dev`), your shell has `NODE_ENV=production` set, which makes npm omit
+> devDependencies. Run `npm install --include=dev` once. All our build tooling
+> lives in devDependencies (there are no runtime deps), so this is the only
+> wrinkle.
+
 Vite prints a local URL (default <http://localhost:5173>). Open it in any modern
 browser. You should see:
 
