@@ -1,0 +1,17 @@
+{
+  "name": "arc-game",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Arc Entertainment — foundation for browser-playable Indonesian indie games (TypeScript + HTML5 Canvas).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}
