@@ -59,4 +59,19 @@ export function houseAt(x: number, y: number): number {
   return -1;
 }
 
+/**
+ * Hit-test against ALL fourteen houses (both rows), for two-player mode where
+ * either side may be clickable. Returns 0..6 or 8..14, or -1.
+ */
+export function houseAtAny(x: number, y: number): number {
+  for (let i = 0; i < PIT_COUNT; i++) {
+    if (i === PLAYER_STORE || i === OPP_STORE) continue;
+    const c = pitCenter(i);
+    const dx = x - c.x;
+    const dy = y - c.y;
+    if (dx * dx + dy * dy <= (HOUSE_RADIUS + 8) * (HOUSE_RADIUS + 8)) return i;
+  }
+  return -1;
+}
+
 export const ALL_INDICES = Array.from({ length: PIT_COUNT }, (_, i) => i);

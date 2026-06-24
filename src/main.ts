@@ -4,9 +4,9 @@ import { CongklakGame } from "./congklak/game";
 /**
  * Arc Entertainment — first title: Congklak (dakon).
  *
- * Solo puzzle mode. The game scene owns all state; the shared fixed-timestep
- * loop drives its update/render. See src/congklak/ for the rules engine and
- * rendering.
+ * Title menu offers three modes: 2-player pass-and-play, vs AI, and the solo
+ * puzzle. The game scene owns all state; the shared fixed-timestep loop drives
+ * its update/render. See src/congklak/ for the rules engine and rendering.
  */
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");

@@ -1,30 +1,52 @@
 /**
- * Congklak game scene: title -> playing -> (animating) -> won/lose, with
- * restart and level progression. Plugs into the fixed-timestep loop via
- * `update(dt)` / `render(alpha)`.
+ * Congklak game scene. One canvas, three modes selected from the title menu:
  *
- * The scene owns all mutable state. Move resolution is delegated to the pure
- * rules engine (`planMove`), and the resulting event list is played back as an
- * animation so the player can read the sowing, relays, chains, and captures.
+ *   - "match"  — two humans pass-and-play, OR one human vs a simple AI.
+ *   - "puzzle" — the original solo target-score levels.
+ *
+ * The scene owns all mutable state. Move resolution always goes through the one
+ * pure rules engine (`planMove`), reached for North via the mirror hook
+ * (`planMoveForPlayer`). Resolved moves are replayed as an animation so players
+ * can read the sowing, relays, chains, and captures — identical playback for
+ * either side, because event indices are already in the canonical display frame.
  */
 
+import { Board, SowEvent, Terminal, planMove, legalMoves, PLAYER_STORE } from "./rules";
 import {
-  Board,
-  SowEvent,
-  Terminal,
-  planMove,
-  legalMoves,
-  PLAYER_STORE,
-} from "./rules";
+  Player,
+  RoundResult,
+  chooseAiMove,
+  concludeRound,
+  createMatchBoard,
+  hasMove,
+  housesOf,
+  legalMovesFor,
+  otherPlayer,
+  storeOf,
+} from "./match";
+import { planMoveForPlayer } from "./perspective";
 import { PUZZLES, boardForPuzzle, Puzzle } from "./puzzles";
-import { pitCenter, houseAt, VIEW_W, VIEW_H, Point } from "./layout";
-import { drawScene, drawTitle, drawEnd, RenderState } from "./render";
+import { pitCenter, houseAt, houseAtAny, VIEW_W, VIEW_H, Point } from "./layout";
+import {
+  drawScene,
+  drawTitle,
+  drawEnd,
+  drawMatchScene,
+  drawMatchEnd,
+  titleOptionAt,
+  MENU_ITEMS,
+  RenderState,
+  MatchRenderState,
+} from "./render";
 
-type Mode = "title" | "playing" | "animating" | "won" | "lost";
+type Screen = "title" | "puzzle" | "match";
+type PuzzlePhase = "playing" | "animating" | "won" | "lost";
+type MatchPhase = "playing" | "animating" | "over";
 
 const STEP_DROP = 0.095;
 const STEP_PICKUP = 0.14;
 const STEP_CAPTURE = 0.52;
+const AI_THINK_DELAY = 0.55; // readable pause before the AI commits a move
 
 interface Anim {
   events: SowEvent[];
@@ -42,18 +64,31 @@ export class CongklakGame {
   private ctx: CanvasRenderingContext2D;
   private canvas: HTMLCanvasElement;
 
-  private mode: Mode = "title";
-  private levelIndex = 0;
-  private puzzle: Puzzle = PUZZLES[0];
-  private board: Board = boardForPuzzle(PUZZLES[0]);
-  private legal: number[] = [];
-  private movesLeft = PUZZLES[0].moves;
+  private screen: Screen = "title";
+  private menuSel = 0;
 
+  // Shared board + animation.
+  private board: Board = createMatchBoard();
   private anim: Anim | null = null;
   private flash: number[] = [];
   private flashTtl = 0;
   private toast: { text: string; alpha: number; ttl: number } | null = null;
   private hoverHouse = -1;
+
+  // Puzzle mode.
+  private puzzlePhase: PuzzlePhase = "playing";
+  private levelIndex = 0;
+  private puzzle: Puzzle = PUZZLES[0];
+  private movesLeft = PUZZLES[0].moves;
+  private legal: number[] = [];
+
+  // Match mode.
+  private vsAi = false;
+  private current: Player = 0;
+  private matchPhase: MatchPhase = "playing";
+  private matchLegal: number[] = [];
+  private roundResult: RoundResult | null = null;
+  private aiThinkTtl = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -63,7 +98,40 @@ export class CongklakGame {
     this.bindInput();
   }
 
-  // --- level lifecycle ------------------------------------------------------
+  // --- mode lifecycle -------------------------------------------------------
+  private gotoTitle(): void {
+    this.screen = "title";
+    this.anim = null;
+    this.flash = [];
+    this.toast = null;
+    this.hoverHouse = -1;
+  }
+
+  private startMenuSelection(): void {
+    if (this.menuSel === 2) this.startPuzzle();
+    else this.startMatch(this.menuSel === 1);
+  }
+
+  private startMatch(vsAi: boolean): void {
+    this.screen = "match";
+    this.vsAi = vsAi;
+    this.board = createMatchBoard();
+    this.current = 0;
+    this.matchPhase = "playing";
+    this.matchLegal = legalMovesFor(this.board, 0);
+    this.roundResult = null;
+    this.anim = null;
+    this.flash = [];
+    this.toast = null;
+    this.hoverHouse = -1;
+    this.aiThinkTtl = 0;
+  }
+
+  private startPuzzle(): void {
+    this.screen = "puzzle";
+    this.loadLevel(0);
+  }
+
   private loadLevel(index: number): void {
     this.levelIndex = index;
     this.puzzle = PUZZLES[index];
@@ -73,11 +141,7 @@ export class CongklakGame {
     this.anim = null;
     this.flash = [];
     this.toast = null;
-    this.mode = "playing";
-  }
-
-  private startGame(): void {
-    this.loadLevel(0);
+    this.puzzlePhase = "playing";
   }
 
   // --- input ----------------------------------------------------------------
@@ -85,52 +149,112 @@ export class CongklakGame {
     this.canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       const { x, y } = this.toView(e.clientX, e.clientY);
-      if (this.mode === "title") {
-        this.startGame();
+      if (this.screen === "title") {
+        const opt = titleOptionAt(x, y);
+        if (opt >= 0) {
+          this.menuSel = opt;
+          this.startMenuSelection();
+        }
         return;
       }
-      if (this.mode === "playing") {
-        const h = houseAt(x, y);
-        if (h >= 0 && this.legal.includes(h)) this.tryMove(h);
-      } else if (this.mode === "won" || this.mode === "lost") {
-        // Click acts as the obvious "continue": next level on a win, else retry.
-        if (this.mode === "won" && this.levelIndex < PUZZLES.length - 1) {
-          this.loadLevel(this.levelIndex + 1);
-        } else {
-          this.loadLevel(this.levelIndex);
-        }
-      }
+      if (this.screen === "puzzle") this.onPuzzlePointer(x, y);
+      else this.onMatchPointer(x, y);
     });
 
     this.canvas.addEventListener("pointermove", (e) => {
       const { x, y } = this.toView(e.clientX, e.clientY);
-      this.hoverHouse = this.mode === "playing" ? houseAt(x, y) : -1;
+      if (this.screen === "title") {
+        const opt = titleOptionAt(x, y);
+        if (opt >= 0) this.menuSel = opt;
+        this.hoverHouse = -1;
+        return;
+      }
+      if (this.screen === "puzzle") {
+        this.hoverHouse = this.puzzlePhase === "playing" ? houseAt(x, y) : -1;
+      } else {
+        const h = this.matchPhase === "playing" && this.isHumanTurn() ? houseAtAny(x, y) : -1;
+        this.hoverHouse = this.matchLegal.includes(h) ? h : -1;
+      }
     });
     this.canvas.addEventListener("pointerleave", () => (this.hoverHouse = -1));
 
-    window.addEventListener("keydown", (e) => {
-      if (this.mode === "title") {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          this.startGame();
-        }
-        return;
+    window.addEventListener("keydown", (e) => this.onKey(e));
+  }
+
+  private onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape" && this.screen !== "title") {
+      this.gotoTitle();
+      return;
+    }
+
+    if (this.screen === "title") {
+      if (e.key === "ArrowDown") {
+        this.menuSel = (this.menuSel + 1) % MENU_ITEMS.length;
+      } else if (e.key === "ArrowUp") {
+        this.menuSel = (this.menuSel - 1 + MENU_ITEMS.length) % MENU_ITEMS.length;
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.startMenuSelection();
       }
-      if (this.mode === "playing" && e.key >= "1" && e.key <= "7") {
-        const h = Number(e.key) - 1;
-        if (this.legal.includes(h)) this.tryMove(h);
-        return;
-      }
-      if (e.key === "r" || e.key === "R") {
-        this.loadLevel(this.levelIndex);
-      } else if (
-        (e.key === "n" || e.key === "N") &&
-        this.mode === "won" &&
-        this.levelIndex < PUZZLES.length - 1
-      ) {
+      return;
+    }
+
+    if (this.screen === "puzzle") {
+      this.onPuzzleKey(e);
+      return;
+    }
+
+    // Match.
+    if (e.key === "r" || e.key === "R") {
+      this.startMatch(this.vsAi);
+      return;
+    }
+    if (
+      this.matchPhase === "playing" &&
+      this.isHumanTurn() &&
+      e.key >= "1" &&
+      e.key <= "7"
+    ) {
+      const house = housesOf(this.current)[Number(e.key) - 1];
+      if (this.matchLegal.includes(house)) this.playMatchMove(house);
+    }
+  }
+
+  private onPuzzleKey(e: KeyboardEvent): void {
+    if (this.puzzlePhase === "playing" && e.key >= "1" && e.key <= "7") {
+      const h = Number(e.key) - 1;
+      if (this.legal.includes(h)) this.startPuzzleMove(h);
+      return;
+    }
+    if (e.key === "r" || e.key === "R") {
+      this.loadLevel(this.levelIndex);
+    } else if (
+      (e.key === "n" || e.key === "N") &&
+      this.puzzlePhase === "won" &&
+      this.levelIndex < PUZZLES.length - 1
+    ) {
+      this.loadLevel(this.levelIndex + 1);
+    }
+  }
+
+  private onPuzzlePointer(x: number, y: number): void {
+    if (this.puzzlePhase === "playing") {
+      const h = houseAt(x, y);
+      if (h >= 0 && this.legal.includes(h)) this.startPuzzleMove(h);
+    } else if (this.puzzlePhase === "won" || this.puzzlePhase === "lost") {
+      if (this.puzzlePhase === "won" && this.levelIndex < PUZZLES.length - 1) {
         this.loadLevel(this.levelIndex + 1);
+      } else {
+        this.loadLevel(this.levelIndex);
       }
-    });
+    }
+  }
+
+  private onMatchPointer(x: number, y: number): void {
+    if (this.matchPhase === "playing" && this.isHumanTurn()) {
+      const h = houseAtAny(x, y);
+      if (this.matchLegal.includes(h)) this.playMatchMove(h);
+    }
   }
 
   private toView(clientX: number, clientY: number): Point {
@@ -141,23 +265,38 @@ export class CongklakGame {
     };
   }
 
-  // --- move handling --------------------------------------------------------
-  private tryMove(house: number): void {
-    const plan = planMove(this.board, house);
+  private isHumanTurn(): boolean {
+    return !this.vsAi || this.current === 0;
+  }
+
+  // --- move handling (shared animation core) --------------------------------
+  private beginAnim(events: SowEvent[], terminal: Terminal, startHouse: number): void {
     this.anim = {
-      events: plan.events,
+      events,
       i: 0,
       elapsed: 0,
       stepDur: STEP_PICKUP,
-      prevIndex: house,
-      terminal: plan.terminal,
+      prevIndex: startHouse,
+      terminal,
       flying: null,
       handCount: 0,
-      handIndex: house,
+      handIndex: startHouse,
     };
-    this.mode = "animating";
-    this.legal = [];
     this.hoverHouse = -1;
+  }
+
+  private startPuzzleMove(house: number): void {
+    const plan = planMove(this.board, house);
+    this.beginAnim(plan.events, plan.terminal, house);
+    this.puzzlePhase = "animating";
+    this.legal = [];
+  }
+
+  private playMatchMove(house: number): void {
+    const plan = planMoveForPlayer(this.board, this.current, house);
+    this.beginAnim(plan.events, plan.terminal, house);
+    this.matchPhase = "animating";
+    this.matchLegal = [];
   }
 
   private stepDurationFor(ev: SowEvent): number {
@@ -192,37 +331,60 @@ export class CongklakGame {
     }
   }
 
-  private finishTurn(): void {
-    const a = this.anim!;
-    const terminal = a.terminal;
+  // --- turn completion ------------------------------------------------------
+  private finishPuzzleTurn(): void {
+    const terminal = this.anim!.terminal;
     this.anim = null;
     const store = this.board.pits[PLAYER_STORE];
 
-    // Reaching the target wins immediately, free turn or not.
     if (store >= this.puzzle.target) {
-      this.mode = "won";
+      this.puzzlePhase = "won";
       return;
     }
-
     if (terminal === "chain") {
       this.showToast("Giliran gratis!");
       this.legal = legalMoves(this.board);
-      if (this.legal.length === 0) {
-        this.mode = "lost"; // no seeds left to keep the chain going
-      } else {
-        this.mode = "playing";
-      }
+      this.puzzlePhase = this.legal.length === 0 ? "lost" : "playing";
+      return;
+    }
+    this.movesLeft -= 1;
+    this.legal = legalMoves(this.board);
+    this.puzzlePhase = this.movesLeft <= 0 || this.legal.length === 0 ? "lost" : "playing";
+  }
+
+  private finishMatchTurn(): void {
+    const terminal = this.anim!.terminal;
+    this.anim = null;
+
+    const keepTurn = terminal === "chain";
+    if (keepTurn && hasMove(this.board, this.current)) {
+      // Free turn for the same player.
+      if (this.isHumanTurn()) this.showToast("Giliran gratis!");
+      this.beginPlayerTurn(this.current);
       return;
     }
 
-    // A normal turn spends a move.
-    this.movesLeft -= 1;
-    this.legal = legalMoves(this.board);
-    if (this.movesLeft <= 0 || this.legal.length === 0) {
-      this.mode = "lost";
-    } else {
-      this.mode = "playing";
+    // Otherwise the turn passes (or the chain dead-ends with no seeds).
+    const next = otherPlayer(this.current);
+    if (!hasMove(this.board, next)) {
+      this.concludeMatch();
+      return;
     }
+    this.beginPlayerTurn(next);
+  }
+
+  private beginPlayerTurn(player: Player): void {
+    this.current = player;
+    this.matchPhase = "playing";
+    this.matchLegal = this.isHumanTurn() ? legalMovesFor(this.board, player) : [];
+    if (!this.isHumanTurn()) this.aiThinkTtl = AI_THINK_DELAY;
+  }
+
+  private concludeMatch(): void {
+    this.roundResult = concludeRound(this.board);
+    this.board = this.roundResult.board;
+    this.matchPhase = "over";
+    this.matchLegal = [];
   }
 
   private showToast(text: string): void {
@@ -241,11 +403,26 @@ export class CongklakGame {
       if (this.toast.ttl <= 0) this.toast = null;
     }
 
-    if (this.mode !== "animating" || !this.anim) return;
+    // AI: after a readable pause, choose and play.
+    if (
+      this.screen === "match" &&
+      this.matchPhase === "playing" &&
+      this.vsAi &&
+      this.current === 1
+    ) {
+      this.aiThinkTtl -= dt;
+      if (this.aiThinkTtl <= 0) {
+        const move = chooseAiMove(this.board, 1);
+        if (move === null) this.concludeMatch();
+        else this.playMatchMove(move);
+      }
+    }
 
+    if (!this.anim) return;
     const a = this.anim;
     if (a.i >= a.events.length) {
-      this.finishTurn();
+      if (this.screen === "puzzle") this.finishPuzzleTurn();
+      else this.finishMatchTurn();
       return;
     }
 
@@ -254,7 +431,6 @@ export class CongklakGame {
     a.elapsed += dt;
     const t = Math.min(1, a.elapsed / a.stepDur);
 
-    // Animate the flying seed for drops.
     if (ev.kind === "drop") {
       a.flying = { from: pitCenter(a.prevIndex), to: pitCenter(ev.index), t };
     } else {
@@ -269,28 +445,39 @@ export class CongklakGame {
   }
 
   render(_alpha: number): void {
-    if (this.mode === "title") {
-      drawTitle(this.ctx);
+    if (this.screen === "title") {
+      drawTitle(this.ctx, this.menuSel);
       return;
     }
-    const st = this.buildRenderState();
-    if (this.mode === "won" || this.mode === "lost") {
-      drawEnd(
-        this.ctx,
-        this.mode === "won",
-        st,
-        this.puzzle.name,
-        this.levelIndex >= PUZZLES.length - 1,
-      );
+    if (this.screen === "puzzle") {
+      const st = this.buildPuzzleState();
+      if (this.puzzlePhase === "won" || this.puzzlePhase === "lost") {
+        drawEnd(
+          this.ctx,
+          this.puzzlePhase === "won",
+          st,
+          this.puzzle.name,
+          this.levelIndex >= PUZZLES.length - 1,
+        );
+      } else {
+        drawScene(this.ctx, st);
+      }
+      return;
+    }
+
+    // Match.
+    const st = this.buildMatchState();
+    if (this.matchPhase === "over") {
+      drawMatchEnd(this.ctx, st, this.roundResult?.winner ?? null);
     } else {
-      drawScene(this.ctx, st);
+      drawMatchScene(this.ctx, st);
     }
   }
 
-  private buildRenderState(): RenderState {
+  private buildPuzzleState(): RenderState {
     return {
       pits: this.board.pits,
-      legal: this.mode === "playing" ? this.legal : [],
+      legal: this.puzzlePhase === "playing" ? this.legal : [],
       hoverHouse: this.hoverHouse,
       flash: this.flash,
       flying: this.anim?.flying ?? null,
@@ -298,9 +485,42 @@ export class CongklakGame {
         this.anim && this.anim.handCount > 0
           ? { index: this.anim.handIndex, count: this.anim.handCount }
           : null,
+      activeStores: [PLAYER_STORE],
+      southLabel: "Lumbung-mu",
+      northLabel: "Lumbung lawan",
       level: this.puzzle.name,
       target: this.puzzle.target,
       movesLeft: this.movesLeft,
+      toast: this.toast ? { text: this.toast.text, alpha: this.toast.alpha } : null,
+    };
+  }
+
+  private buildMatchState(): MatchRenderState {
+    const south = this.board.pits[PLAYER_STORE];
+    const north = this.board.pits[storeOf(1)];
+    let turnText: string;
+    if (this.vsAi) {
+      turnText = this.current === 0 ? "Giliranmu (bawah)" : "AI berpikir…";
+    } else {
+      turnText = this.current === 0 ? "Giliran Selatan (bawah)" : "Giliran Utara (atas)";
+    }
+    return {
+      pits: this.board.pits,
+      legal: this.matchLegal,
+      hoverHouse: this.hoverHouse,
+      flash: this.flash,
+      flying: this.anim?.flying ?? null,
+      hand:
+        this.anim && this.anim.handCount > 0
+          ? { index: this.anim.handIndex, count: this.anim.handCount }
+          : null,
+      activeStores: [storeOf(this.current)],
+      southLabel: this.vsAi ? "Lumbung-mu" : "Pemain Selatan",
+      northLabel: this.vsAi ? "Lumbung AI" : "Pemain Utara",
+      turnText,
+      southScore: south,
+      northScore: north,
+      vsAi: this.vsAi,
       toast: this.toast ? { text: this.toast.text, alpha: this.toast.alpha } : null,
     };
   }

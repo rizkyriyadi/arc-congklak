@@ -460,40 +460,85 @@ function panel(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
-export function drawTitle(ctx: CanvasRenderingContext2D): void {
+/** Title-menu options, in display order. The index is the menu selection. */
+export const MENU_ITEMS: { title: string; sub: string }[] = [
+  { title: "2 Pemain", sub: "Pass-and-play — dua manusia bergiliran" },
+  { title: "Lawan AI", sub: "Tantang lawan komputer" },
+  { title: "Mode Teka-teki", sub: "Latihan solo: kumpulkan biji target" },
+];
+
+const MENU_TOP = 300; // y of the first option's centre
+const MENU_STEP = 64;
+const MENU_W = 520;
+const MENU_H = 52;
+
+/** Pixel rect of menu option `i` (for drawing and hit-testing). */
+function menuRect(i: number): { x: number; y: number; w: number; h: number } {
+  const cy = MENU_TOP + i * MENU_STEP;
+  return { x: VIEW_W / 2 - MENU_W / 2, y: cy - MENU_H / 2, w: MENU_W, h: MENU_H };
+}
+
+/** Return the menu option index under a view-space point, or -1. */
+export function titleOptionAt(x: number, y: number): number {
+  for (let i = 0; i < MENU_ITEMS.length; i++) {
+    const r = menuRect(i);
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+  }
+  return -1;
+}
+
+export function drawTitle(ctx: CanvasRenderingContext2D, selected: number): void {
   const bg = ctx.createLinearGradient(0, 0, 0, VIEW_H);
   bg.addColorStop(0, COL_BG_TOP);
   bg.addColorStop(1, COL_BG_BOT);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  panel(ctx);
 
   ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
   ctx.fillStyle = COL_GOLD;
-  ctx.font = "bold 56px ui-rounded, system-ui, sans-serif";
-  ctx.fillText("Congklak", VIEW_W / 2, VIEW_H / 2 - 110);
+  ctx.font = "bold 60px ui-rounded, system-ui, sans-serif";
+  ctx.fillText("Congklak", VIEW_W / 2, 150);
   ctx.fillStyle = COL_TEXT_DIM;
   ctx.font = "17px system-ui, sans-serif";
-  ctx.fillText("dakon — permainan biji tradisional Nusantara", VIEW_W / 2, VIEW_H / 2 - 78);
+  ctx.fillText("dakon — permainan biji tradisional Nusantara", VIEW_W / 2, 184);
 
-  ctx.fillStyle = COL_TEXT;
-  ctx.font = "15px ui-rounded, system-ui, sans-serif";
-  const rules = [
-    "Pilih satu rumahmu — bijinya disebar satu per lubang, berlawanan arah jarum jam.",
-    "Biji terakhir jatuh di lumbungmu → giliran gratis (rantai!).",
-    "Berakhir di rumah kosong milikmu → tembak biji seberang ke lumbung.",
-    "Kumpulkan biji target sebelum langkahmu habis.",
-  ];
-  rules.forEach((line, i) => {
-    ctx.fillText(line, VIEW_W / 2, VIEW_H / 2 - 36 + i * 26);
+  // Menu options.
+  MENU_ITEMS.forEach((item, i) => {
+    const r = menuRect(i);
+    const on = i === selected;
+    ctx.save();
+    ctx.fillStyle = on ? "rgba(232, 176, 75, 0.16)" : "rgba(40, 26, 15, 0.65)";
+    ctx.strokeStyle = on ? COL_GOLD : "rgba(232, 176, 75, 0.35)";
+    ctx.lineWidth = on ? 2.5 : 1.5;
+    roundRect(ctx, r.x, r.y, r.w, r.h, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = on ? COL_GOLD : COL_TEXT;
+    ctx.font = "bold 20px ui-rounded, system-ui, sans-serif";
+    ctx.fillText(item.title, r.x + 22, r.y + r.h / 2);
+    ctx.fillStyle = COL_TEXT_DIM;
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(item.sub, r.x + r.w - 22, r.y + r.h / 2);
   });
 
-  ctx.fillStyle = COL_GOLD;
-  ctx.font = "bold 20px ui-rounded, system-ui, sans-serif";
-  ctx.fillText("Klik atau tekan Spasi untuk mulai", VIEW_W / 2, VIEW_H / 2 + 120);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = COL_TEXT_DIM;
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.fillText(
+    "↑/↓ pilih · Enter atau klik untuk mulai",
+    VIEW_W / 2,
+    MENU_TOP + MENU_ITEMS.length * MENU_STEP,
+  );
   ctx.fillStyle = COL_TEXT_DIM;
   ctx.font = "12px system-ui, sans-serif";
-  ctx.fillText("Arc Entertainment", VIEW_W / 2, VIEW_H / 2 + 156);
+  ctx.fillText("Arc Entertainment", VIEW_W / 2, VIEW_H - 26);
 }
 
 export function drawEnd(
